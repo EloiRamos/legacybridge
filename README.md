@@ -214,25 +214,24 @@ Version 1.0 is a tested proof of concept running as a local demonstration, not a
 
 ### Architectural trade-offs
 
-| Choice | Benefit | Cost |
+LEGACYBRIDGE prioritizes a focused, reproducible integration workflow over production-scale infrastructure. The main architectural decisions reflect the constraints of the legacy ERP and the scope of the proof of concept.
+
+| Decision | Rationale | Trade-off |
 |---|---|---|
-| In-memory draft state | No database; simple, testable locking | A console restart loses drafts, attempts and history, including `UNKNOWN` work; the operator must then search HALDEN by reference |
-| Draft ID as correlation key in HALDEN's reference field | Works with the ERP as it is | No idempotency; a historical order with the same reference (32 random bits), account and lines could falsely corroborate a booking; a customer PO reference cannot be carried and must be booked in HALDEN directly |
-| Single process, single operator | Simple concurrency model | Drafts are shared by all browser sessions; an approval is a click by whoever operates the console, not an authenticated individual approval |
-| Simulation control plane (`/_sim/*`) | Deterministic fault injection for demos and tests | It bypasses HALDEN's ticket checks; set `HALDEN_SIM_CONTROL=false` to remove it |
+| In-memory workflow state | Keep the local implementation simple and testable. | Drafts, attempts, and unresolved outcomes are lost on restart and require manual investigation. |
+| ERP-compatible order correlation | Reconcile order outcomes through the existing ERP interface without modifying it. | Correlation is not idempotency and cannot guarantee unique order identification or prevent duplicates. |
+| Single-process operation | Maintain a bounded execution and concurrency model. | State is shared across browser sessions, with no authenticated individual approvals or durable persistence. |
+| Deterministic fault simulation | Reproduce failure scenarios consistently during development and demonstrations. | Simulation controls bypass normal ERP ticket checks and must be disabled outside controlled environments (`HALDEN_SIM_CONTROL=false`). |
 
 ### Known limitations
 
-- **Simulated engagement.** The client, the ERP and all data are fictional. The project has not been deployed for a real client and establishes no commercial outcome, productivity gains, time savings or duplicate-prevention rates.
-- **No production validation.** No multi-process or multi-user operation, no production-scale performance testing, and concurrency is tested with scripted interleavings rather than real network timing.
-- **Not exactly-once.** At most one POST per approval is enforced; exactly-once execution and idempotency are not claimed.
-- **Uncertain outcomes need care.** While a draft is `UNKNOWN`, the console warns but does not block preparing a separate draft for the same goods; approving it could book the goods twice if the original request committed. Resolving a persistent `UNKNOWN` is a manual process.
-- **Process-local IDs.** Draft IDs are unique only within one console process and can recur after a restart or demo reset.
-- **Reset during in-flight operations is unsupported.** The in-flight approval or re-check can fail, and if a new draft then receives the same ID, the old operation's result can be recorded on the new draft.
-- **Assistant.** Real-model behavior has not been evaluated. The automated tests use a scripted model and static checks, which show that the tool wiring and boundaries work, not that a real model behaves reliably.
-- **Business semantics.** "Available" means free units in HALDEN's allocation pool (pooled across the DUS and MAN warehouses) at read time, not a delivery date or reservation. Draft prices are estimates; the booked price is reported, not verified.
-- **Catalogue scale.** Every product view reads HALDEN's complete item master (12 records here) to keep identity and stock verdicts consistent. A production-size catalogue would need a different read strategy, which has not been designed.
-- **Network assumptions.** `NOT_APPLIED` on a connection error assumes no intermediary proxy, and this design has none. Ports bind to loopback but remain reachable by other local users and processes; do not expose them to a network.
+LEGACYBRIDGE is a local integration proof of concept built around a fictional industrial distributor and simulated ERP. Its architecture demonstrates specific engineering decisions and tested behaviors, rather than production readiness.
+
+- **Deployment and scalability.** The project has not been deployed to a real customer or validated under production workloads. It does not support production-grade multi-user operation, and its full-catalogue inventory reads are not designed for large datasets. No commercial outcomes or productivity improvements are claimed.
+- **State and concurrency.** Drafts, approval attempts, and reconciliation history are stored in memory. Restarting the console loses this state, including unresolved outcomes. Resetting during an in-flight operation is unsupported and can incorrectly associate an earlier operation’s result with a new draft.
+- **Order execution and reconciliation.** Each approval permits at most one order-submission POST. This does not provide exactly-once execution or idempotency. An unresolved outcome may require manual investigation, and approving a separate draft can still result in duplicate orders. ERP reference correlation also carries a residual risk of false matches.
+- **AI assistant.** The optional assistant is limited to information retrieval and draft preparation, without order-submission authority. Automated tests exercise its tool boundaries using scripted behavior; real-model reliability has not been evaluated.
+- **ERP and network constraints.** Inventory availability reflects the ERP’s current allocation pool, not a reservation or delivery commitment. Draft prices are estimates, and reported booked prices are not independently verified. Connection-error classification assumes no intermediary proxy. Services bind to loopback but remain accessible to other local processes and users; the current configuration must not be exposed to a network.
 
 ## Authorship & AI-assisted development
 
