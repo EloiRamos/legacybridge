@@ -28,20 +28,7 @@ These invariants are enforced in code and exercised by tests within the single-p
 
 ## Architecture
 
-```mermaid
-flowchart LR
-  subgraph legacy["legacy-erp container (Java 8)"]
-    GW[GatewayFilter: ticket, rate limit] --> SV[Servlets E1–E8] --> OB[OrderBook: one JDBC transaction] --> DB[(SQLite, inside the container)]
-    SIM[/_sim control plane: demo and tests only/]
-  end
-  subgraph modern["console container (Python 3.12)"]
-    UI[Streamlit console: 5 views] --> SVC[BridgeService: snapshot, DraftStore, reconciliation]
-    AST[Scenarios Mode A / LangChain Mode B, 6 read/draft tools] --> SVC
-    SVC --> CL[LegacyClient: E1–E8 only]
-  end
-  CL -- "HTTP only (http://legacy-erp:8090)" --> GW
-  OP([Operator]) -- "browser, 127.0.0.1:8501" --> UI
-```
+<img src="docs/assets/architecture.svg" width="100%" alt="LEGACYBRIDGE architecture: a human operator uses the Streamlit interface in the Python console container; the interface and an optional, bounded AI assistant call BridgeService, which calls LegacyClient; LegacyClient reaches HALDEN ERP 3.1 (Java 8) over HTTP only, through GatewayFilter, servlets E1–E8, OrderBook and SQLite. Order writes follow prepare, authorize, attempt, observe and reconcile.">
 
 | Owned by the legacy system (Java) | Owned by the integration (Python) |
 |---|---|
