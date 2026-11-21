@@ -1,0 +1,28 @@
+services:
+  legacy-erp:
+    build: ./legacy-erp
+    image: legacybridge/halden-erp:3.1
+    ports: ["127.0.0.1:8090:8090"]
+    environment:
+      HALDEN_RESET_ON_START: "true"
+      HALDEN_SIM_CONTROL: "${HALDEN_SIM_CONTROL:-true}"
+    healthcheck:
+      test: ["CMD", "java", "-cp", "/opt/halden/halden-erp.jar", "com.brightwater.halden.HealthCheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  console:
+    build: .
+    image: legacybridge/console:1.0
+    command: ["streamlit", "run", "src/legacybridge/ui/app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--browser.gatherUsageStats=false"]
+    ports: ["127.0.0.1:8501:8501"]
+    environment:
+      LEGACY_BASE_URL: "http://legacy-erp:8090"
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      legacy-erp:
+        condition: service_healthy

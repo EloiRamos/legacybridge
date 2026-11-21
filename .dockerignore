@@ -1,0 +1,10 @@
+.env
+.venv/
+.git/
+planning/
+reports/
+docs/
+tests/
+legacy-erp/
+__pycache__/
+*.db

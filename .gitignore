@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+*.db-*
+legacy-erp/target/
+planning/
+reports/
+.DS_Store
+halden-http-observations.md
