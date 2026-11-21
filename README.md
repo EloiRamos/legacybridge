@@ -6,11 +6,25 @@ LEGACYBRIDGE is a simulated Forward Deployed Engineering (FDE) engagement: moder
 
 Version 1.0 is a functional Python/Streamlit proof of concept that integrates with a simulated Java 8 ERP through a strict HTTP boundary. It demonstrates human-authorized order submission, deterministic normalization of inconsistent enterprise data, and reconciliation of uncertain transactions without blind retries. It ships with a local demonstration environment, deterministic integration tests, and an optional AI assistant restricted to read-only operations and draft preparation.
 
-The Streamlit console represents the initial client-demonstration phase: a working solution of the kind presented to a prospective client to illustrate the proposed workflows and expose integration constraints. A full-scale flagship implementation would be a separate, future phase.
+The Streamlit console corresponds to the client-demonstration phase of such an engagement: a working interface for showing the proposed workflows and surfacing integration constraints. A production system would be a separate phase; see [Scope & limitations](#scope--limitations).
 
 > **Simulated engagement, real engineering.** The client, *Brightwater Industrial Supply*, and all of its people, accounts and figures are fictional. *HALDEN ERP 3.1* is a purpose-built Java 8 legacy-system simulator, not a real product. The integration code, tests and recorded results are real. No real client deployment, commercial validation or production implementation is claimed.
 
+**Stack:** Python 3.12 · httpx · Pydantic · Streamlit · Java 8 · Apache Tomcat 9 · JDBC · SQLite · Docker Compose · pytest · JUnit · LangChain (optional assistant)
+
+**Jump to:** [Quick start](#quick-start) · [Failure recovery demo](#failure-recovery-demonstration) · [Testing & verification](#testing--verification) · [Scope & limitations](#scope--limitations) · [Architecture details](docs/ARCHITECTURE.md)
+
 ![Order Desk with a READY draft and the single approval button](docs/assets/order-desk-approval.png)
+
+## The integration problem
+
+The fictional distributor keeps HALDEN as its system of record and builds a safer order-desk workflow around HALDEN's existing HTTP interface instead of replacing it. Three problems make this non-trivial:
+
+- **Which account?** "Alder & Finch" exists twice, and one account is on credit hold. The console lists both and never auto-picks.
+- **What can safely be offered?** The ERP's availability flag disagrees with warehouse balances, one SKU exists as two item records with conflicting prices, and some quantities are unreadable. The console flags these as data-quality issues and withholds verdicts it cannot support.
+- **Did the booking happen?** The reply to an order request can be lost after HALDEN has committed the order, and HALDEN has no idempotency. A blind retry could book the goods twice.
+
+HALDEN's simulated constraints include a shared service ticket (a new login revokes the previous one), an XML item master where a missing element differs from an empty one, business errors returned with HTTP 200, and a free-text, non-unique, 12-character reference field.
 
 ## Engineering highlights
 
@@ -18,7 +32,7 @@ The Streamlit console represents the initial client-demonstration phase: a worki
 |---|---|---|
 | **Strict HTTP-only legacy boundary** | Two containers with no shared volume, database or code. `httpx` is imported only in the legacy client; the Python package never imports `sqlite3` or opens database files. | `tests/test_boundaries.py` |
 | **Deterministic normalization** | Pure functions turn mixed date formats, decimal commas, `J`/`nein` flags, duplicate SKUs and unreadable quantities into typed models. Uncertain stock is `UNDETERMINED`, never a guess. | 57 normalization tests |
-| **Human-approved order submission** | Only the operator's approve button creates an approval. It is consumed atomically before any network I/O, and draft IDs are allocated uniquely, so an approval always refers to the content that was reviewed. | Race tests repeated 20×; `tests/test_draft_integrity.py` |
+| **Human-approved order submission** | Only the operator's approve button creates an approval. It is consumed atomically before any network I/O, and draft IDs are allocated uniquely within the console process, so an approval refers to the draft content that was reviewed. | Approval race repeated 20× in `tests/test_draft_state.py`; 27 tests in `tests/test_draft_integrity.py` |
 | **At most one order POST per approval** | The transport has `retries=0` and no redirects. Timeouts, 5xx replies and authentication failures never trigger a second order POST. | Order-POST counts at the HTTP transport in the test suites |
 | **Uncertain-outcome reconciliation** | A lost reply is `UNKNOWN`, not `FAILED`. The only permitted action is a read-only re-check, serialized per draft; account, reference and lines must all match before `CONFIRMED`. | 92 draft state-machine tests; live tests; [recorded run](#failure-recovery-demonstration) |
 | **Bounded assistant tool access** | Six read/draft tools and no submit tool. Static tests forbid the assistant code from referencing submission or simulator functions. | `tests/test_assistant.py` |
@@ -46,16 +60,6 @@ These invariants are enforced in code and exercised by tests within the single-p
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/LEGACY_API.md](docs/LEGACY_API.md).
 
-### The integration problem
-
-The fictional distributor keeps HALDEN as its system of record and builds a safer order-desk workflow around HALDEN's existing HTTP interface instead of replacing it. Three problems make this non-trivial:
-
-- **Which account?** "Alder & Finch" exists twice, and one account is on credit hold. The console lists both and never auto-picks.
-- **What can safely be offered?** The ERP's availability flag disagrees with warehouse balances, one SKU exists as two item records with conflicting prices, and some quantities are unreadable. The console flags these as data-quality issues and withholds verdicts it cannot support.
-- **Did the booking happen?** The reply to an order request can be lost after HALDEN has committed the order, and HALDEN has no idempotency. A blind retry could book the goods twice.
-
-HALDEN's simulated constraints include a shared service ticket (a new login revokes the previous one), an XML item master where a missing element differs from an empty one, business errors returned with HTTP 200, and a free-text, non-unique, 12-character reference field.
-
 ## Core engineering decisions
 
 | Decision | Reason |
@@ -72,7 +76,7 @@ HALDEN's simulated constraints include a shared service ticket (a new login revo
 
 All ten decision records, with trade-offs: [docs/ENGINEERING_DECISIONS.md](docs/ENGINEERING_DECISIONS.md).
 
-## Engineering Challenges & Lessons Learned
+## Engineering challenges & lessons learned
 
 ### The gateway authorized one path and dispatched another
 
@@ -99,7 +103,6 @@ if (bypassesGateway(path) || allowed(req, res, path)) { chain.doFilter(req, res)
 
 - Before the fix, the 21 existing Java contract tests passed and the two new regression tests in [`GatewayRouteClassificationContractTest`](legacy-erp/src/test/java/com/brightwater/halden/GatewayRouteClassificationContractTest.java) failed with `expected:<401> but was:<200>`. They send 13 non-canonical spellings with simulation control on and off.
 - After the fix, all 23 contract tests passed, and the `curl --path-as-is` checks in [`http_acceptance.sh`](legacy-erp/acceptance/http_acceptance.sh) passed.
-- A separate project-internal review exercised additional non-canonical paths, including percent-encoded and path-parameter forms.
 
 **Lesson.** Security decisions must use the same canonical representation as the component executing the request, and tests must include non-canonical inputs to reveal a disagreement.
 
@@ -226,8 +229,9 @@ Version 1.0 is a tested proof of concept running as a local demonstration, not a
 - **Uncertain outcomes need care.** While a draft is `UNKNOWN`, the console warns but does not block preparing a separate draft for the same goods; approving it could book the goods twice if the original request committed. Resolving a persistent `UNKNOWN` is a manual process.
 - **Process-local IDs.** Draft IDs are unique only within one console process and can recur after a restart or demo reset.
 - **Reset during in-flight operations is unsupported.** The in-flight approval or re-check can fail, and if a new draft then receives the same ID, the old operation's result can be recorded on the new draft.
-- **Assistant.** Real-model behavior has not been evaluated.
+- **Assistant.** Real-model behavior has not been evaluated. The automated tests use a scripted model and static checks, which show that the tool wiring and boundaries work, not that a real model behaves reliably.
 - **Business semantics.** "Available" means free units in HALDEN's allocation pool (pooled across the DUS and MAN warehouses) at read time, not a delivery date or reservation. Draft prices are estimates; the booked price is reported, not verified.
+- **Catalogue scale.** Every product view reads HALDEN's complete item master (12 records here) to keep identity and stock verdicts consistent. A production-size catalogue would need a different read strategy, which has not been designed.
 - **Network assumptions.** `NOT_APPLIED` on a connection error assumes no intermediary proxy, and this design has none. Ports bind to loopback but remain reachable by other local users and processes; do not expose them to a network.
 
 ## Authorship & AI-assisted development
